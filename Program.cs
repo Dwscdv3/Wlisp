@@ -8,7 +8,9 @@ Argument<FileSystemInfo> inputArgument = new(
   getDefaultValue: () => new DirectoryInfo(Directory.GetCurrentDirectory())
 );
 
-RootCommand rootCommand = [inputArgument];
+RootCommand rootCommand = new("An indentation-based Lisp syntax transpiler") {
+  inputArgument,
+};
 rootCommand.SetHandler(App, inputArgument);
 await rootCommand.InvokeAsync(args);
 
@@ -44,17 +46,22 @@ void CompileFile(string path) {
     StringBuilder text = new();
     var tokenCount = CountTokens(line);
     List<string> children = GetChildren(indent);
+    var joinedChildren = string.Join(Environment.NewLine, children);
     text.Append($"{line[..indent]}");
     if (children.Count + tokenCount > 1) text.Append('(');
-    text.Append($"{line[indent..]}");
-    if (children.Count > 0) text.AppendLine();
-    text.Append(string.Join(Environment.NewLine, children));
+    if (!MatchBlockHeader().IsMatch(line.Trim())) {
+      text.Append($"{line[indent..]}");
+      if (children.Count > 0) text.AppendLine();
+      text.Append(joinedChildren);
+    } else {
+      text.Append(joinedChildren.TrimStart());
+    }
     if (children.Count + tokenCount > 1) text.Append(')');
     return text.ToString();
   }
 
   List<string> GetChildren(int parentIndent) {
-    List<string> subtrees = [];
+    List<string> children = [];
     int? subtreeIndent = null;
     while (NextLine() is string line) {
       if (line.All(char.IsWhiteSpace) || line.TrimStart()[0] == ';') {
@@ -64,13 +71,19 @@ void CompileFile(string path) {
       if (lineIndent > parentIndent) {
         subtreeIndent ??= lineIndent;
         if (lineIndent != subtreeIndent) Error("Inconsistent indentation");
-        subtrees.Add(CompileSubtree(line, lineIndent));
+        children.Add(CompileSubtree(line, lineIndent));
       } else {
-        lineNumber--;
-        break;
+        if (lineIndent == parentIndent && line[parentIndent] == '|') {
+          children.Add(
+            line[..parentIndent] + indentChar + line[(parentIndent + 1)..]
+          );
+        } else {
+          lineNumber--;
+          break;
+        }
       }
     }
-    return subtrees;
+    return children;
   }
   
   string? NextLine() => lineNumber < lines.Length ? lines[lineNumber++] : null;
@@ -119,4 +132,6 @@ void CompileFile(string path) {
 partial class Program {
   [GeneratedRegex(@"""(\\\\|\\""|.)*?""")]
   private static partial Regex MatchLispString();
+  [GeneratedRegex(@"^(\.+|-+|_+|‾+)$")]
+  private static partial Regex MatchBlockHeader();
 }
